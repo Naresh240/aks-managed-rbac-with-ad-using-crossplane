@@ -165,7 +165,7 @@ spec:
       toFieldPath: spec.forProvider.addressPrefixes
       
 # ------------------------------ providers ---------------------------
-- name: kubernetes
+  - name: kubernetes
     base:
       apiVersion: kubernetes.crossplane.io/v1alpha1
       kind: ProviderConfig

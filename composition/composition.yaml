@@ -1,0 +1,265 @@
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: naresh-composition
+  labels:
+    provider: azure
+    cluster: aks
+spec:
+  compositeTypeRef:
+    apiVersion: devopstoolkitseries.com/v1alpha1
+    kind: CompositeCluster
+  writeConnectionSecretsToNamespace: crossplane-system
+  patchSets:
+  - name: location
+    patches:
+    - fromFieldPath: spec.parameters.location
+      toFieldPath: spec.forProvider.location
+  resources:
+# ------------------------------- AKS Cluster ----------------------------
+  - name: aks
+    base:
+      apiVersion: containerservice.azure.jet.crossplane.io/v1alpha2
+      kind: KubernetesCluster
+      spec:
+        writeConnectionSecretToRef:
+        namespace: crossplane-system      
+        forProvider:
+          resourceGroupNameSelector:
+            matchControllerRef: true
+          vnetSubnetIDSelector:
+            matchControllerRef: true            
+          defaultNodePool:
+            - name: default
+              vmSize: "Standard_B2s"
+              nodeCount: 1                        
+          dnsPrefix: "nareshaks"
+          roleBasedAccessControl:
+          - enabled: true
+            azureActiveDirectory:
+              managed: true
+              azureRbacEnabled: false
+              adminGroupObjectIds: ["b2a27b2f-f45d-4f3a-82e9-07ec2daeed74"]
+          identity:
+            - type: "SystemAssigned"
+        providerConfigRef:
+          name: azure-jet-provider-config
+    patches:
+    - patchSetName: location
+      type: PatchSet
+    - fromFieldPath: spec.id
+      toFieldPath: metadata.name
+    - fromFieldPath: spec.id
+      toFieldPath: spec.tags.purpose      
+    - fromFieldPath: spec.id
+      toFieldPath: metadata.labels[crossplane.io/app]
+# ------------------------------- AKS Nodepool ----------------------------      
+  - name: aksnode
+    base:
+      apiVersion: containerservice.azure.jet.crossplane.io/v1alpha2
+      kind: KubernetesClusterNodePool
+      spec:
+        forProvider:
+          kubernetesClusterIdSelector:
+            matchControllerRef: true
+          vnetSubnetIDSelector:
+            matchControllerRef: true 
+        providerConfigRef:
+          name: azure-jet-provider-config
+    patches:
+    - patchSetName: location
+      type: PatchSet
+    - fromFieldPath: spec.id
+      toFieldPath: metadata.name
+      transforms:
+        - type: string
+          string:
+            fmt: "%snp"      
+    - fromFieldPath: spec.parameters.nodeCount
+      toFieldPath: spec.forProvider.nodeCount
+    - fromFieldPath: spec.parameters.nodeSize
+      toFieldPath: spec.forProvider.vmSize
+      transforms:
+      - type: map
+        map:
+          small: Standard_B2s
+          medium: Standard_B4ms
+          large: Standard_B8ms
+    # - type: ToCompositeFieldPath
+    #   fromFieldPath: status.conditions[0].status
+    #   toFieldPath: status.nodePoolStatus
+    connectionDetails:
+      - fromConnectionSecretKey: kubeconfig 
+# ------------------------------- Resource Group -------------------------
+  - name: resource-group
+    base:
+      apiVersion: azure.jet.crossplane.io/v1alpha2
+      kind: ResourceGroup
+      spec:
+        forProvider:
+          tags:
+            provisioner: crossplane
+        providerConfigRef:
+          name: azure-jet-provider-config
+    patches:
+    - patchSetName: location
+      type: PatchSet
+    - fromFieldPath: spec.id
+      toFieldPath: metadata.name
+      transforms:
+        - type: string
+          string:
+            fmt: "%s-rg"
+    - fromFieldPath: spec.id
+      toFieldPath: metadata.labels[crossplane.io/app]            
+# ------------------------------- v-net ----------------------------------
+  - name: v-net-nodepool
+    base:
+      apiVersion: network.azure.jet.crossplane.io/v1alpha2
+      kind: VirtualNetwork
+      spec:
+        forProvider:
+          resourceGroupNameSelector:
+            matchControllerRef: true
+        providerConfigRef:
+          name: azure-jet-provider-config 
+    patches:
+    - patchSetName: location
+      type: PatchSet
+    - fromFieldPath: spec.id
+      toFieldPath: metadata.name
+      transforms:
+        - type: string
+          string:
+            fmt: "%s-vnet1"
+    - fromFieldPath: spec.id
+      toFieldPath: metadata.labels[crossplane.io/app]            
+    - fromFieldPath: spec.vnetcidrBlock
+      toFieldPath: spec.forProvider.addressSpace
+# ------------------------------- subnet ----------------------------------      
+  - name: subnet-nodepool
+    base:
+      apiVersion: network.azure.jet.crossplane.io/v1alpha2
+      kind: Subnet
+      spec:
+        forProvider:
+          resourceGroupNameSelector:
+            matchControllerRef: true
+          virtualNetworkNameSelector:
+            matchControllerRef: true
+        providerConfigRef:
+          name: azure-jet-provider-config 
+    patches:
+    - patchSetName: location
+      type: PatchSet
+    - fromFieldPath: spec.id
+      toFieldPath: metadata.name
+      transforms:
+        - type: string
+          string:
+            fmt: "%s-subnet"
+    - fromFieldPath: spec.id
+      toFieldPath: metadata.labels[crossplane.io/app]            
+    - fromFieldPath: spec.subnetCidrBlock1
+      toFieldPath: spec.forProvider.addressPrefixes
+      
+# ------------------------------ providers ---------------------------
+- name: kubernetes
+    base:
+      apiVersion: kubernetes.crossplane.io/v1alpha1
+      kind: ProviderConfig
+      spec:
+        writeConnectionSecretToRef:
+          namespace: crossplane-system      
+        credentials:
+          source: Secret
+          secretRef:
+            key: kubeconfig
+    patches:
+    - fromFieldPath: spec.id
+      toFieldPath: metadata.name
+    - fromFieldPath: spec.writeConnectionSecretToRef.namespace
+      toFieldPath: spec.credentials.secretRef.namespace
+    - fromFieldPath: spec.id
+      toFieldPath: spec.credentials.secretRef.name
+      transforms:
+        - type: string
+          string:
+            fmt: "%s-cluster"
+    readinessChecks:
+      - type: None
+
+# ------------------------- Kubernetes RBAC Role for aksreadonly User Access ---------------------------------
+  - name: k8s-read-role
+    base:
+      apiVersion: kubernetes.crossplane.io/v1alpha1
+      kind: Object
+      spec:
+        forProvider:
+          manifest:
+            apiVersion: rbac.authorization.k8s.io/v1
+            kind: Role
+            metadata:
+              name: readonly-role
+            rules:
+            - apiGroups: ["", "extensions", "apps"]
+              resources: ["*"]
+              verbs: ["get", "list", "watch"]
+            - apiGroups: ["batch"]
+              resources:
+              - jobs
+              - cronjobs
+              verbs: ["get", "list", "watch"]
+    patches:
+    - fromFieldPath: spec.id
+      toFieldPath: metadata.name
+      transforms:
+        - type: string
+          string:
+            fmt: "%s-read-role"
+    - fromFieldPath: spec.id
+      toFieldPath: spec.providerConfigRef.name
+
+  - name: k8s-read-rolebinding
+    base:
+      apiVersion: kubernetes.crossplane.io/v1alpha1
+      kind: Object
+      spec:
+        forProvider:
+          manifest:
+            kind: RoleBinding
+            apiVersion: rbac.authorization.k8s.io/v1
+            metadata:
+              name: readonly-rolebinding
+            roleRef:
+              apiGroup: rbac.authorization.k8s.io
+              kind: Role
+              name: readonly-role
+            subjects:
+            - kind: Group
+              name: "b2a27b2f-f45d-4f3a-82e9-07ec2daeed74"
+    patches:
+    - fromFieldPath: spec.id
+      toFieldPath: metadata.name
+      transforms:
+        - type: string
+          string:
+            fmt: "%s-read-rolebinding"
+    - fromFieldPath: spec.id
+      toFieldPath: spec.providerConfigRef.name
+
+---
+apiVersion: kubernetes.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  name: dev-namespace
+spec:
+  forProvider:
+    manifest:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: dev
+  providerConfigRef:
+    name: kubernetes-provider

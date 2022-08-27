@@ -1,0 +1,1 @@
+# aks-managed-rbac-with-ad-using-crossplane

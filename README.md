@@ -66,14 +66,6 @@ kubectl apply -f provider.yaml
 kubectl apply -f providerconfig.yaml
 ```
 
-## Create services without xrd --> switch to direct folder
-
-```bash
-kubectl apply -f resource-group.yaml
-kubectl apply -f network/
-kubectl apply -f kubernetes/
-```
-
 ## Create services with xrd, composition and claim --> switch to composition folder
 
 ```bash

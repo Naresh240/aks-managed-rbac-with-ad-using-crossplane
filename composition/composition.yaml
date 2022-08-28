@@ -23,8 +23,6 @@ spec:
       apiVersion: containerservice.azure.jet.crossplane.io/v1alpha2
       kind: KubernetesCluster
       spec:
-        writeConnectionSecretToRef:
-        namespace: crossplane-system      
         forProvider:
           resourceGroupNameSelector:
             matchControllerRef: true
@@ -51,6 +49,12 @@ spec:
       type: PatchSet
     - fromFieldPath: spec.id
       toFieldPath: metadata.name
+    - fromFieldPath: spec.id
+      toFieldPath: spec.writeConnectionSecretToRef.name
+      transforms:
+        - type: string
+          string:
+            fmt: "%s-cluster"      
     - fromFieldPath: spec.id
       toFieldPath: spec.tags.purpose      
     - fromFieldPath: spec.id
@@ -133,7 +137,7 @@ spec:
       transforms:
         - type: string
           string:
-            fmt: "%s-vnet1"
+            fmt: "%s-vnet"
     - fromFieldPath: spec.id
       toFieldPath: metadata.labels[crossplane.io/app]            
     - fromFieldPath: spec.vnetcidrBlock
@@ -163,4 +167,110 @@ spec:
     - fromFieldPath: spec.id
       toFieldPath: metadata.labels[crossplane.io/app]            
     - fromFieldPath: spec.subnetCidrBlock1
-      toFieldPath: spec.forProvider.addressPrefixes 
+      toFieldPath: spec.forProvider.addressPrefixes
+
+# ------------------------------ providers ---------------------------
+  - name: kubernetes-providerconfig
+    base:
+      apiVersion: kubernetes.crossplane.io/v1alpha1
+      kind: ProviderConfig
+      spec:
+        credentials:
+          source: Secret
+          secretRef:
+            key: kubeconfig
+    patches:
+    - fromFieldPath: spec.id
+      toFieldPath: metadata.name
+    - fromFieldPath: spec.writeConnectionSecretToRef.namespace
+      toFieldPath: spec.credentials.secretRef.namespace
+    - fromFieldPath: spec.id
+      toFieldPath: spec.credentials.secretRef.name
+      transforms:
+        - type: string
+          string:
+            fmt: "%s-cluster"
+    readinessChecks:
+      - type: None
+
+# ------------------------- Kubernetes RBAC Role for aksreadonly User Access ---------------------------------
+  - name: k8s-read-role
+    base:
+      apiVersion: kubernetes.crossplane.io/v1alpha1
+      kind: Object
+      spec:
+        forProvider:
+          manifest:
+            apiVersion: rbac.authorization.k8s.io/v1
+            kind: Role
+            metadata:
+              name: readonly-role
+            rules:
+            - apiGroups: ["", "extensions", "apps"]
+              resources: ["*"]
+              verbs: ["get", "list", "watch"]
+            - apiGroups: ["batch"]
+              resources:
+              - jobs
+              - cronjobs
+              verbs: ["get", "list", "watch"]
+    patches:
+    - fromFieldPath: spec.id
+      toFieldPath: metadata.name
+      transforms:
+        - type: string
+          string:
+            fmt: "%s-read-role"
+    - fromFieldPath: spec.id
+      toFieldPath: spec.providerConfigRef.name
+
+  - name: k8s-read-rolebinding
+    base:
+      apiVersion: kubernetes.crossplane.io/v1alpha1
+      kind: Object
+      spec:
+        forProvider:
+          manifest:
+            kind: RoleBinding
+            apiVersion: rbac.authorization.k8s.io/v1
+            metadata:
+              name: readonly-rolebinding
+            roleRef:
+              apiGroup: rbac.authorization.k8s.io
+              kind: Role
+              name: readonly-role
+            subjects:
+            - kind: Group
+              name: "b2a27b2f-f45d-4f3a-82e9-07ec2daeed74"
+    patches:
+    - fromFieldPath: spec.id
+      toFieldPath: metadata.name
+      transforms:
+        - type: string
+          string:
+            fmt: "%s-read-rolebinding"
+    - fromFieldPath: spec.id
+      toFieldPath: spec.providerConfigRef.name
+
+  - name: k8s-dev-ns
+    base:
+      apiVersion: kubernetes.crossplane.io/v1alpha1
+      kind: Object
+      metadata:
+        name: dev-namespace
+      spec:
+        forProvider:
+          manifest:
+            apiVersion: v1
+            kind: Namespace
+            metadata:
+              name: dev
+    patches:
+    - fromFieldPath: spec.id
+      toFieldPath: metadata.name
+      transforms:
+        - type: string
+          string:
+            fmt: "%s-ns"
+    - fromFieldPath: spec.id
+      toFieldPath: spec.providerConfigRef.name

@@ -2,7 +2,7 @@
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:
-  name: naresh-composition
+  name: azure-composition
   labels:
     provider: azure
     cluster: aks
@@ -24,24 +24,30 @@ spec:
       kind: KubernetesCluster
       spec:
         forProvider:
+          enableAutoScaling: true
           resourceGroupNameSelector:
             matchControllerRef: true
           vnetSubnetIDSelector:
-            matchControllerRef: true            
+            matchControllerRef: true
           defaultNodePool:
             - name: default
+              enableNodePublicIp: false
               vmSize: "Standard_B2s"
-              nodeCount: 1                        
-          dnsPrefix: "nareshaks"
+              nodeCount: 1                
+          dnsPrefix: "exampleaks"
           roleBasedAccessControl:
           - enabled: true
             azureActiveDirectory:
-            - managed: true
-              azureRbacEnabled: false
-              adminGroupObjectIds: 
-              - b2a27b2f-f45d-4f3a-82e9-07ec2daeed74
+            - azureRbacEnabled: false
+              managed: true
+              tenantId: 38ae3bcd-9579-4fd4-adda-b42e1495d55a
+              adminGroupObjectIds:
+                - aaf8a60f-6ad0-4ba1-abcd-1a42d588ccbe
+          # localAccountDisabled: true              
           identity:
-            - type: "SystemAssigned"
+          - type: "SystemAssigned"
+          tags:
+            purpose: example
         providerConfigRef:
           name: azure-jet-provider-config
     patches:
@@ -50,26 +56,37 @@ spec:
     - fromFieldPath: spec.id
       toFieldPath: metadata.name
     - fromFieldPath: spec.id
+      toFieldPath: spec.tags.purpose      
+    - fromFieldPath: spec.id
+      toFieldPath: metadata.labels[crossplane.io/app]
+    - fromFieldPath: spec.id
       toFieldPath: spec.writeConnectionSecretToRef.name
       transforms:
         - type: string
           string:
-            fmt: "%s-cluster"      
-    - fromFieldPath: spec.id
-      toFieldPath: spec.tags.purpose      
-    - fromFieldPath: spec.id
-      toFieldPath: metadata.labels[crossplane.io/app]
+            fmt: "%s-cluster"
+    - fromFieldPath: spec.writeConnectionSecretToRef.namespace
+      toFieldPath: spec.writeConnectionSecretToRef.namespace
+    - fromFieldPath: spec.parameters.allowedips
+      toFieldPath: spec.forProvider.apiServerAuthorizedIpRanges                       
 # ------------------------------- AKS Nodepool ----------------------------      
   - name: aksnode
     base:
       apiVersion: containerservice.azure.jet.crossplane.io/v1alpha2
       kind: KubernetesClusterNodePool
+      metadata:
+        name: clusternp
       spec:
         forProvider:
+          enableAutoScaling: true
+          minCount: 1
+          maxCount: 4
+          nodeCount: 1
           kubernetesClusterIdSelector:
             matchControllerRef: true
           vnetSubnetIDSelector:
-            matchControllerRef: true 
+            matchControllerRef: true
+          enableNodePublicIp: false
         providerConfigRef:
           name: azure-jet-provider-config
     patches:
@@ -83,17 +100,18 @@ spec:
             fmt: "%snp"      
     - fromFieldPath: spec.parameters.nodeCount
       toFieldPath: spec.forProvider.nodeCount
+    - fromFieldPath: spec.parameters.minCount
+      toFieldPath: spec.forProvider.minCount
+    - fromFieldPath: spec.parameters.maxCount
+      toFieldPath: spec.forProvider.maxCount        
     - fromFieldPath: spec.parameters.nodeSize
       toFieldPath: spec.forProvider.vmSize
       transforms:
       - type: map
         map:
-          small: Standard_B2s
+          small: Standard_B4ms
           medium: Standard_B4ms
           large: Standard_B8ms
-    # - type: ToCompositeFieldPath
-    #   fromFieldPath: status.conditions[0].status
-    #   toFieldPath: status.nodePoolStatus
     connectionDetails:
       - fromConnectionSecretKey: kubeconfig 
 # ------------------------------- Resource Group -------------------------
@@ -143,7 +161,7 @@ spec:
     - fromFieldPath: spec.vnetcidrBlock
       toFieldPath: spec.forProvider.addressSpace
 # ------------------------------- subnet ----------------------------------      
-  - name: subnet-nodepool
+  - name: subnet1
     base:
       apiVersion: network.azure.jet.crossplane.io/v1alpha2
       kind: Subnet
@@ -163,14 +181,67 @@ spec:
       transforms:
         - type: string
           string:
-            fmt: "%s-subnet"
+            fmt: "%s-subnet1"
     - fromFieldPath: spec.id
       toFieldPath: metadata.labels[crossplane.io/app]            
     - fromFieldPath: spec.subnetCidrBlock1
       toFieldPath: spec.forProvider.addressPrefixes
 
-# ------------------------------ providers ---------------------------
-  - name: kubernetes-providerconfig
+  - name: subnet2
+    base:
+      apiVersion: network.azure.jet.crossplane.io/v1alpha2
+      kind: Subnet
+      spec:
+        forProvider:
+          resourceGroupNameSelector:
+            matchControllerRef: true
+          virtualNetworkNameSelector:
+            matchControllerRef: true
+        providerConfigRef:
+          name: azure-jet-provider-config 
+    patches:
+    - patchSetName: location
+      type: PatchSet
+    - fromFieldPath: spec.id
+      toFieldPath: metadata.name
+      transforms:
+        - type: string
+          string:
+            fmt: "%s-subnet2"
+    - fromFieldPath: spec.id
+      toFieldPath: metadata.labels[crossplane.io/app]
+    - fromFieldPath: spec.subnetCidrBlock2
+      toFieldPath: spec.forProvider.addressPrefixes
+
+  - name: subnet3
+    base:
+      apiVersion: network.azure.jet.crossplane.io/v1alpha2
+      kind: Subnet
+      spec:
+        forProvider:
+          resourceGroupNameSelector:
+            matchControllerRef: true
+          virtualNetworkNameSelector:
+            matchControllerRef: true
+        providerConfigRef:
+          name: azure-jet-provider-config 
+    patches:
+    - patchSetName: location
+      type: PatchSet
+    - fromFieldPath: spec.id
+      toFieldPath: metadata.name
+      transforms:
+        - type: string
+          string:
+            fmt: "%s-subnet3"
+    - fromFieldPath: spec.id
+      toFieldPath: metadata.labels[crossplane.io/app]
+    - fromFieldPath: spec.subnetCidrBlock3
+      toFieldPath: spec.forProvider.addressPrefixes
+
+# -------------------------------------------- Provider Config --------------------------------------------
+
+  - name: kubernetes
     base:
       apiVersion: kubernetes.crossplane.io/v1alpha1
       kind: ProviderConfig
@@ -178,7 +249,7 @@ spec:
         credentials:
           source: Secret
           secretRef:
-            key: kubeconfig
+            key: attribute.kube_admin_config_raw
     patches:
     - fromFieldPath: spec.id
       toFieldPath: metadata.name
@@ -193,6 +264,90 @@ spec:
     readinessChecks:
       - type: None
 
+  - name: helm
+    base:
+      apiVersion: helm.crossplane.io/v1beta1
+      kind: ProviderConfig
+      spec:
+        writeConnectionSecretToRef:
+          namespace: crossplane-system      
+        credentials:
+          source: Secret
+          secretRef:
+            key: attribute.kube_admin_config_raw
+    patches:
+    - fromFieldPath: spec.id
+      toFieldPath: metadata.name
+    - fromFieldPath: spec.writeConnectionSecretToRef.namespace
+      toFieldPath: spec.credentials.secretRef.namespace
+    - fromFieldPath: spec.id
+      toFieldPath: spec.credentials.secretRef.name
+      transforms:
+        - type: string
+          string:
+            fmt: "%s-cluster"
+    readinessChecks:
+      - type: None
+
+# ------------------------- Kubernetes RBAC Role for aks development User Access ---------------------------------
+  - name: k8s-developer-role
+    base:
+      apiVersion: kubernetes.crossplane.io/v1alpha1
+      kind: Object
+      spec:
+        forProvider:
+          manifest:
+            apiVersion: rbac.authorization.k8s.io/v1
+            kind: Role
+            metadata:
+              name: developer-role
+              namespace: dev
+            rules:
+            - apiGroups: ["*"]
+              resources: ["*"]
+              verbs: ["*"]
+    patches:
+    - fromFieldPath: spec.id
+      toFieldPath: metadata.name
+      transforms:
+        - type: string
+          string:
+            fmt: "%s-developer-role"
+    - fromFieldPath: spec.id
+      toFieldPath: spec.providerConfigRef.name     
+
+  - name: k8s-developer-rolebinding
+    base:
+      apiVersion: kubernetes.crossplane.io/v1alpha1
+      kind: Object
+      spec:
+        forProvider:
+          manifest:
+            kind: RoleBinding
+            apiVersion: rbac.authorization.k8s.io/v1
+            metadata:
+              name: developer-rolebinding
+              namespace: dev
+            roleRef:
+              apiGroup: rbac.authorization.k8s.io
+              kind: Role
+              name: developer-role
+              namespace: dev
+            subjects:
+            - kind: Group
+              name: "4723c32b-2def-4c51-befd-7715f55e97da"
+    patches:
+    - fromFieldPath: spec.id
+      toFieldPath: metadata.name
+      transforms:
+        - type: string
+          string:
+            fmt: "%s-developer-rolebinding"
+    - fromFieldPath: spec.id
+      toFieldPath: spec.providerConfigRef.name
+    - fromFieldPath: spec.userdetails.development-users
+      toFieldPath: spec.forProvider.subjects.name 
+
 # ------------------------- Kubernetes RBAC Role for aksreadonly User Access ---------------------------------
   - name: k8s-read-role
     base:
@@ -205,6 +360,7 @@ spec:
             kind: Role
             metadata:
               name: readonly-role
+              namespace: dev
             rules:
             - apiGroups: ["", "extensions", "apps"]
               resources: ["*"]
@@ -222,7 +378,7 @@ spec:
           string:
             fmt: "%s-read-role"
     - fromFieldPath: spec.id
-      toFieldPath: spec.providerConfigRef.name
+      toFieldPath: spec.providerConfigRef.name     
 
   - name: k8s-read-rolebinding
     base:
@@ -235,13 +391,15 @@ spec:
             apiVersion: rbac.authorization.k8s.io/v1
             metadata:
               name: readonly-rolebinding
+              namespace: dev
             roleRef:
               apiGroup: rbac.authorization.k8s.io
               kind: Role
               name: readonly-role
+              namespace: dev
             subjects:
             - kind: Group
-              name: "b2a27b2f-f45d-4f3a-82e9-07ec2daeed74"
+              name: "b2939c09-e751-4c5b-beba-e9e8bb51870d"
     patches:
     - fromFieldPath: spec.id
       toFieldPath: metadata.name
@@ -251,13 +409,59 @@ spec:
             fmt: "%s-read-rolebinding"
     - fromFieldPath: spec.id
       toFieldPath: spec.providerConfigRef.name
+    - fromFieldPath: spec.userdetails.readonly-users
+      toFieldPath: spec.forProvider.subjects.name     
+# -------------------------------------------- Kubernetes objects --------------------------------------------
+  - name: ns-crossplane
+    base:
+      apiVersion: kubernetes.crossplane.io/v1alpha1
+      kind: Object
+      spec:
+        forProvider:
+          manifest:
+            apiVersion: v1
+            kind: Namespace
+            metadata:
+              name: crossplane-system
+    patches:
+    - fromFieldPath: spec.id
+      toFieldPath: metadata.name
+      transforms:
+        - type: string
+          string:
+            fmt: "%s-ns-crossplane"
+    - fromFieldPath: spec.id
+      toFieldPath: spec.providerConfigRef.name
 
-  - name: k8s-dev-ns
+  - name: flux
     base:
       apiVersion: kubernetes.crossplane.io/v1alpha1
       kind: Object
       metadata:
-        name: dev-namespace
+        name: ns-fluxsystem
+      spec:
+        forProvider:
+          manifest:
+            apiVersion: v1
+            kind: Namespace
+            metadata:
+              name: flux-system
+        providerConfigRef:
+          name: kubernetes-provider
+    patches:
+    - fromFieldPath: spec.id
+      toFieldPath: metadata.name
+      transforms:
+        - type: string
+          string:
+            fmt: "%s-ns-fluxsystem"
+    - fromFieldPath: spec.id
+      toFieldPath: spec.providerConfigRef.name
+
+  - name: ns-dev
+    base:
+      apiVersion: kubernetes.crossplane.io/v1alpha1
+      kind: Object
       spec:
         forProvider:
           manifest:
@@ -271,6 +475,83 @@ spec:
       transforms:
         - type: string
           string:
-            fmt: "%s-ns"
+            fmt: "%s-ns-dev"
+    - fromFieldPath: spec.id
+      toFieldPath: spec.providerConfigRef.name
+
+  # - name: k8s-provider-sa
+  #   base:
+  #     apiVersion: kubernetes.crossplane.io/v1alpha1
+  #     kind: Object
+  #     spec:
+  #       forProvider:
+  #         manifest:
+  #           apiVersion: v1
+  #           kind: ServiceAccount
+  #           metadata:
+  #             name: provider-kubernetes
+  #             namespace: crossplane-system
+  #   patches:
+  #   - fromFieldPath: spec.id
+  #     toFieldPath: metadata.name
+  #     transforms:
+  #       - type: string
+  #         string:
+  #           fmt: "%s-k8s-provider-sa"
+  #   - fromFieldPath: spec.id
+  #     toFieldPath: spec.providerConfigRef.name
+
+  # - name: k8s-provider-crb
+  #   base:
+  #     apiVersion: kubernetes.crossplane.io/v1alpha1
+  #     kind: Object
+  #     spec:
+  #       forProvider:
+  #         manifest:
+  #           apiVersion: rbac.authorization.k8s.io/v1
+  #           kind: ClusterRoleBinding
+  #           metadata:
+  #             name: provider-kubernetes
+  #           subjects:
+  #           - kind: ServiceAccount
+  #             name: provider-kubernetes
+  #             namespace: crossplane-system
+  #           roleRef:
+  #             kind: ClusterRole
+  #             name: cluster-admin
+  #             apiGroup: rbac.authorization.k8s.io
+  #   patches:
+  #   - fromFieldPath: spec.id
+  #     toFieldPath: metadata.name
+  #     transforms:
+  #       - type: string
+  #         string:
+  #           fmt: "%s-k8s-provider-crb"
+  #   - fromFieldPath: spec.id
+  #     toFieldPath: spec.providerConfigRef.name
+
+# -------------------------------------------- Helm Releases --------------------------------------------
+  - name: external-dns
+    base:
+      apiVersion: helm.crossplane.io/v1beta1
+      kind: Release
+      spec:
+        forProvider: 
+          namespace: crossplane-system
+          chart:
+            name: external-dns
+            repository: https://charts.bitnami.com/bitnami
+          values:
+            provider: azure
+            clusterDomain: siemensxsolution.com
+            azure: 
+              secretName: "azure-config"
+    patches:
+    - fromFieldPath: spec.id
+      toFieldPath: metadata.name
+      transforms:
+        - type: string
+          string:
+            fmt: "%s-external-dns"
     - fromFieldPath: spec.id
       toFieldPath: spec.providerConfigRef.name

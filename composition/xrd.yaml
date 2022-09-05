@@ -35,7 +35,22 @@ spec:
                 description: CIDR Block for subnet1
                 type: array
                 items:
-                  type: string                                                   
+                  type: string
+              subnetCidrBlock2:
+                description: CIDR Block for subnet2
+                type: array
+                items:
+                  type: string
+              subnetCidrBlock3:
+                description: CIDR Block for subnet3
+                type: array
+                items:
+                  type: string
+              adminGroupObjectIds:
+                description: Provide admin group IDs
+                type: array
+                items:
+                  type: string                                                                                         
               parameters:
                 type: object
                 properties:
@@ -48,8 +63,29 @@ spec:
                   nodeCount:
                     description: number of nodes for the kubernetes cluster
                     type: number
+                  minCount:
+                    description: min number of nodes for the kubernetes cluster
+                    type: number
+                  maxCount:
+                    description: max number of nodes for the kubernetes cluster
+                    type: number
+                  allowedips:
+                    description: allowing sider ranges to access AKS cluster
+                    type: array
+                    items:
+                      type: string                    
                 required:
                 - nodeSize                
             required:
             - id
             - parameters
+          status:
+            type: object
+            properties:
+              clusterName:
+                description: The name of the cluster
+                type: string
+    additionalPrinterColumns:
+    - name: clusterName
+      type: string
+      jsonPath: ".status.clusterName"

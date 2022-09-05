@@ -1,17 +1,25 @@
 ---
 apiVersion: devopstoolkitseries.com/v1alpha1
-kind: ClusterClaim
+kind: AzureCompositeCluster
 metadata:
   name: naresh
 spec:
   id: naresh
   compositionRef:
-    name: naresh-composition
+    name: azure-composition
   vnetcidrBlock:
-    - 10.0.0.0/25
+    - 10.0.0.0/16
   subnetCidrBlock1:
-    - 10.0.0.0/25
+    - 10.0.0.0/24
+  subnetCidrBlock2:
+    - 10.0.1.0/24
+  subnetCidrBlock3:
+    - 10.0.2.0/24
+  adminGroupObjectIds:
+    - aaf8a60f-6ad0-4ba1-abcd-1a42d588ccbe     
   parameters:
     location: northeurope
     nodeSize: small
-    nodeCount: 1
+    nodeCount: 2
+    minCount: 1
+    maxCount: 4
